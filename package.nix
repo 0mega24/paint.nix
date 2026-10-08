@@ -13,8 +13,11 @@
   util-linux,
   wineWow64Packages,
   dxvk,
+  mesa,
   # Avoid the older pkgs.wine that callPackage would inject for a "wine" argument.
   winePackage ? wineWow64Packages.unstableFull,
+  # Bundle Mesa for use on Linux distributions other than NixOS.
+  withMesaFallback ? true,
 }:
 
 assert lib.assertMsg (lib.versionAtLeast winePackage.version "11.15")
@@ -106,6 +109,7 @@ stdenvNoCC.mkDerivation {
         ]
       } \
       --subst-var-by dxvk ${dxvk.bin} \
+      --subst-var-by mesaIcds "${lib.optionalString withMesaFallback "${mesa}/share/vulkan/icd.d"}" \
       --subst-var-by app $share/app \
       --subst-var-by theme $share/theme \
       --subst-var-by fonts $share/fonts \

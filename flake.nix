@@ -27,7 +27,9 @@
         { lib, ... }:
         {
           imports = [ ./module.nix ];
-          programs.paintdotnet.package = lib.mkDefault self.packages.${system}.paintdotnet;
+          programs.paintdotnet.package = lib.mkDefault (
+            self.packages.${system}.paintdotnet.override { withMesaFallback = false; }
+          );
         };
 
       homeManagerModules.default =
