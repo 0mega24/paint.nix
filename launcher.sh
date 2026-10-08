@@ -3,6 +3,7 @@ set -euo pipefail
 
 WINE_BIN=@wine@/bin
 DXVK=@dxvk@
+MESA_ICDS=@mesaIcds@
 APP_STORE=@app@
 THEME_DIR=@theme@
 FONTS_DIR=@fonts@
@@ -17,6 +18,20 @@ export WINEDEBUG="${WINEDEBUG:--all}"
 export PATH="$WINE_BIN:@runtimePath@:$PATH"
 
 log() { printf 'paintdotnet: %s\n' "$*" >&2; }
+
+# Use packaged drivers when the host has no NixOS graphics setup.
+if [ -n "$MESA_ICDS" ] && [ ! -d /run/opengl-driver ] \
+    && [ -z "${VK_DRIVER_FILES:-}${VK_ICD_FILENAMES:-}${VK_ADD_DRIVER_FILES:-}" ] \
+    && [ "${PAINTDOTNET_MESA_FALLBACK:-1}" = 1 ]; then
+    export VK_DRIVER_FILES="$MESA_ICDS"
+fi
+
+# Warn before prefix setup so a setup failure does not hide the limit.
+nofile="$(ulimit -Hn)"
+if [ "$nofile" != unlimited ] && [ "$nofile" -lt 65536 ]; then
+    log "warning: hard open-file limit is $nofile; Paint.NET may report 'Too many open files'."
+    log "see the README for how to set the hard limit to 524288"
+fi
 
 # Copy the exe so .NET uses this writable directory for portable-mode settings.
 sync_app() {

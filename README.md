@@ -1,6 +1,7 @@
 # paint.nix
 
-Run [Paint.NET](https://www.getpaint.net/) on x86_64 NixOS using the experimental
+Run [Paint.NET](https://www.getpaint.net/) on x86_64 Linux with Nix using the
+experimental
 [Paint.NET-on-Wine](https://github.com/paintdotnet/Paint.NET-on-Wine) release.
 The package includes Wine, DXVK, a dark Windows 10-style theme, Selawik fonts,
 and a desktop entry. A small Wine shim fixes floating palette dragging under
@@ -38,6 +39,37 @@ configuration.
 | Package only | Add `paint-nix.packages.x86_64-linux.default` to `environment.systemPackages` or `home.packages`. |
 | Run without installing | `nix run github:0mega24/paint.nix` |
 | Overlay | Add `paint-nix.overlays.default` to `nixpkgs.overlays` and install `pkgs.paintdotnet`. |
+
+### Run on other Linux distributions
+
+On distributions other than NixOS, host Vulkan drivers may need libraries
+outside the Nix store. The package includes Mesa to avoid depending on those
+libraries. If `/run/opengl-driver` is absent, the launcher points
+`VK_DRIVER_FILES` at the bundled drivers. These include Intel, AMD, NVIDIA
+nouveau, and lavapipe for software rendering. The NixOS module omits Mesa
+from the package and uses the system graphics configuration.
+
+For NVIDIA's proprietary driver, launch with
+[nixGL's Vulkan wrapper](https://github.com/nix-community/nixGL):
+
+```sh
+nix run --impure github:nix-community/nixGL#nixVulkanNvidia -- nix run github:0mega24/paint.nix
+```
+
+The launcher leaves driver selection to you when `VK_DRIVER_FILES`,
+`VK_ICD_FILENAMES`, or `VK_ADD_DRIVER_FILES` has a nonempty value.
+
+A low hard limit for open files can cause `Too many open files` errors.
+The launcher warns when `ulimit -Hn` is below 65536. On systems that use
+PAM's `pam_limits`, add the following to
+`/etc/security/limits.d/90-nofile.conf`, then log out and back in:
+
+```text
+*  soft  nofile  65536
+*  hard  nofile  524288
+```
+
+Check `ulimit -Hn` in the new session to confirm the limit took effect.
 
 The module and package outputs use this flake's pinned nixpkgs. The overlay
 uses your nixpkgs, which must provide `wineWow64Packages.unstableFull` at
@@ -86,6 +118,7 @@ Existing file arguments are converted to Windows paths before launching Wine.
 | `PAINTDOTNET_PREFIX` | `$PAINTDOTNET_HOME/prefix` | Use a different Wine prefix. |
 | `PAINTDOTNET_THEME` | `win10dark` | Set to `none` to skip theme installation in a new prefix. It does not undo an already installed theme. |
 | `PAINTDOTNET_DRAGFIX` | `1` | Set to `0` to disable the palette drag shim. |
+| `PAINTDOTNET_MESA_FALLBACK` | `1` | Set to `0` to disable automatic selection of the bundled Mesa drivers. |
 | `WINE_DRAGFIX_LOG` | Unset | Append drag diagnostics to the specified file. |
 | `WINEDEBUG` | `-all` | Override Wine's logging settings. |
 | `DXVK_LOG_LEVEL` | `error` | Override DXVK's logging level. |

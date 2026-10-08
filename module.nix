@@ -14,7 +14,7 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.callPackage ./package.nix { };
+      default = pkgs.callPackage ./package.nix { withMesaFallback = false; };
       defaultText = lib.literalExpression "paint.nix's paintdotnet package";
       description = "Package used to run Paint.NET.";
     };
