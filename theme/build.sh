@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# build.sh <rc-file> <out.msstyles> -- compile a Wine v3 msstyles theme from rc + bmp resources
-# Needs Wine's resource compiler (wrc, ships with Wine) and a mingw-w64 cross gcc/windres.
+# Usage: build.sh <resources.rc> <output.msstyles>
+# WRC selects Wine's resource compiler; CROSS selects the mingw-w64 tool prefix.
 set -euo pipefail
 WRC="${WRC:-wrc}"
 CROSS="${CROSS:-x86_64-w64-mingw32-}"

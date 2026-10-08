@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
-"""Generate a "Windows 10 Dark" variant of Wine's built-in aero.msstyles source.
+"""Generate a dark theme from Wine's aero resources.
 
-Wine's uxtheme only loads XP-format (PACKTHEM_VERSION 3) themes, so the real
-Windows 10 aero.msstyles (version 4, compiled VSCLASS data) cannot be used.
-Instead this restyles Wine's own LGPL theme source, which defines every class
-and part apps such as Paint.NET query:
-
-  * window frames / captions / caption buttons are redrawn from scratch in the
-    flat Windows 10 dark style (square, borderless buttons, red close hover);
-  * every other control's SVG is recolored to a Windows 10 dark palette with
-    square corners, rendered with Inkscape, and written into a BMP that reuses
-    the original file's header (same size, bit depth and alpha layout);
-  * the theme INI gets Windows 10 dark system colors and Segoe UI fonts.
-
-usage: win10theme.py <aero-src-dir> <out-dir>
+Usage: win10theme.py <aero-src-dir> <out-dir>
 """
 import colorsys
 import os
@@ -24,12 +12,6 @@ import subprocess
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
-
-SRC, OUT = sys.argv[1], sys.argv[2]
-
-# --------------------------------------------------------------------------
-# Palette
-# --------------------------------------------------------------------------
 
 def hex2rgb(h):
     h = h.lstrip('#').lower()
@@ -42,29 +24,29 @@ def rgb2hex(c):
     return '#%02x%02x%02x' % tuple(c)
 
 
-# Every color used by Wine's aero SVGs, mapped to its Windows 10 dark role.
+# Explicit mappings for aero colors that need a particular control or glyph role.
 SVG_MAP = {
-    # control backgrounds (white in aero)
+    # Control backgrounds
     'ffffff': '2b2b2b', 'fffffe': '2b2b2b', 'fefefe': '2b2b2b',
     'fffff9': '2b2b2b', 'fdffff': '2b2b2b', 'f5f5f5': '333333',
-    # neutral borders / separators
+    # Borders and separators
     'aeaeae': '7a7a7a', '909090': '8c8c8c', 'a6a6a6': '6a6a6a', 'bdbdbd': '5a5a5a',
-    # dark grays and black are glyph/text colors -> light
+    # Text and glyphs
     '787878': 'a8a8a8', '5a5a5a': 'c8c8c8', '2d2d2d': 'd6d6d6',
     '282828': 'dadada', '0a0a0a': 'f2f2f2', '000000': 'f2f2f2',
-    # blues -> Windows 10 default accent family
+    # Accent and selection colors
     '3096fa': '429ce3',   # hot border
     '2979ff': '0078d7',   # pressed / checked
     '0091ea': '0078d7',
     'e3f2fd': '33414f', 'e1f5fe': '33414f',   # hover tint
     'bbdefb': '264f78', 'b3e5fc': '264f78',   # selection tint
-    # close button reds
+    # Close button
     'ff1744': 'e81123', 'd50000': 'f1707a',
 }
 
 
 def generic_remap(rgb):
-    """Fallback for colors not in SVG_MAP: invert neutrals, pull blues to accent."""
+    """Invert neutral tones and map blue tones to the accent palette."""
     r, g, b = [x / 255 for x in rgb]
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     if s < 0.2 or l > 0.95 or l < 0.05:
@@ -95,22 +77,17 @@ def recolor_svg(text, is_glyph):
                 return cm.group(1) + '#ffffff'
             return cm.group(1) + map_color(cm.group(2))
         el = COLOR_RE.sub(color, el)
-        if tag == 'rect':                      # Windows 10 controls are square
+        if tag == 'rect':
             el = re.sub(r'\b(rx|ry)="[^"]*"', r'\1="0"', el)
         return el
     text = ELEMENT_RE.sub(element, text)
-    # Unfilled shapes (check marks, radio dots, arrows) use SVG's default black
-    # fill; make the default the remapped glyph color instead.
+    # Shapes without a fill inherit black, which is unreadable on the dark background.
     if not re.search(r'<svg\b[^>]*\sfill=', text):
         text = re.sub(r'<svg\b', '<svg fill="%s"' % map_color('#000000'), text, count=1)
-    # gradient stops etc. outside the matched elements
+    # Gradient stops are not included in ELEMENT_RE.
     return COLOR_RE.sub(lambda cm: cm.group(1) + map_color(cm.group(2)), text) \
         if 'stop-color' in text else text
 
-
-# --------------------------------------------------------------------------
-# BMP output that preserves the original header (size, depth, alpha masks)
-# --------------------------------------------------------------------------
 
 def bmp_info(path):
     b = open(path, 'rb').read()
@@ -120,6 +97,7 @@ def bmp_info(path):
 
 
 def write_bmp(orig, img, dest, flatten=(43, 43, 43)):
+    """Replace pixels while preserving Wine's original BMP header and alpha masks."""
     header, w, h, bpp = bmp_info(orig)
     img = img.convert('RGBA')
     assert img.size == (w, abs(h)), (orig, img.size, (w, h))
@@ -140,14 +118,12 @@ def write_bmp(orig, img, dest, flatten=(43, 43, 43)):
     open(dest, 'wb').write(out)
 
 
-# --------------------------------------------------------------------------
-# Windows 10 window parts, drawn directly
-# --------------------------------------------------------------------------
-
-CAP = [(32, 32, 32), (43, 43, 43)]             # active, inactive caption
-BORDER = [(85, 85, 85), (60, 60, 60)]          # 1px window border
+# Caption and border colors are ordered active, inactive.
+CAP = [(32, 32, 32), (43, 43, 43)]
+BORDER = [(85, 85, 85), (60, 60, 60)]
 CLOSE_HOT, CLOSE_PRESSED = (232, 17, 35), (241, 112, 122)
-GLYPH = [  # per caption state: normal, hot, pressed, disabled
+# Each caption has normal, hover, pressed, and disabled glyph colors.
+GLYPH = [
     [(255, 255, 255), (255, 255, 255), (255, 255, 255), (93, 93, 93)],
     [(140, 140, 140), (255, 255, 255), (255, 255, 255), (74, 74, 74)],
 ]
@@ -158,7 +134,7 @@ def lighten(c, d):
 
 
 def stack(w, h, n, draw_one):
-    """Build a vertical strip of n images of w x (h/n), drawn by draw_one(img, i)."""
+    """Stack n states in a w-by-h bitmap, calling draw_one for each state."""
     ih = h // n
     strip = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     for i in range(n):
@@ -169,16 +145,20 @@ def stack(w, h, n, draw_one):
 
 
 def frame_piece(edges):
-    """Solid caption-colored piece with a 1px border on the given edges (l,t,r,b)."""
+    """Draw a frame piece; edges uses l, t, r, and b for its one-pixel borders."""
     def draw(im, i):
         a = i % 2
         d = ImageDraw.Draw(im)
         w, h = im.size
         d.rectangle([0, 0, w - 1, h - 1], fill=CAP[a] + (255,))
-        if 'l' in edges: d.line([0, 0, 0, h - 1], fill=BORDER[a] + (255,))
-        if 'r' in edges: d.line([w - 1, 0, w - 1, h - 1], fill=BORDER[a] + (255,))
-        if 't' in edges: d.line([0, 0, w - 1, 0], fill=BORDER[a] + (255,))
-        if 'b' in edges: d.line([0, h - 1, w - 1, h - 1], fill=BORDER[a] + (255,))
+        if 'l' in edges:
+            d.line([0, 0, 0, h - 1], fill=BORDER[a] + (255,))
+        if 'r' in edges:
+            d.line([w - 1, 0, w - 1, h - 1], fill=BORDER[a] + (255,))
+        if 't' in edges:
+            d.line([0, 0, w - 1, 0], fill=BORDER[a] + (255,))
+        if 'b' in edges:
+            d.line([0, h - 1, w - 1, h - 1], fill=BORDER[a] + (255,))
     return draw
 
 
@@ -199,8 +179,8 @@ def glyph(kind, sets=2):
         a, s = (i // 4, i % 4) if sets == 2 else (0, i % 4)
         col = GLYPH[a][s]
         n = im.size[0]
-        g = max(5, round(n * 0.72))           # glyph extent (10px at 13px cell)
-        sw = max(1, round(n / 13))             # stroke width
+        g = max(5, round(n * 0.72))
+        sw = max(1, round(n / 13))
         x0 = (n - g) // 2
         y0 = (im.size[1] - g) // 2
         mask = Image.new('L', im.size, 0)
@@ -226,7 +206,7 @@ def glyph(kind, sets=2):
             elif kind == 'restore':
                 o = max(2, round(g * 0.2))
                 inner = g - o
-                # back window: only its top and right edges show
+                # Only the top and right edges of the rear window are visible.
                 d.rectangle([x0 + o, y0, x0 + g - 1, y0 + sw - 1], fill=255)
                 d.rectangle([x0 + g - sw, y0, x0 + g - 1, y0 + inner - 1], fill=255)
                 box(x0, y0 + o, inner)
@@ -242,7 +222,7 @@ def glyph(kind, sets=2):
 
 
 def window_part(name, w, h):
-    """Return a drawn RGBA strip for a blue_window_* bitmap, or None to recolor its SVG."""
+    """Draw a window bitmap, or return None to use its recolored SVG."""
     base = name[len('blue_window_'):-4]
     if base in ('caption', 'caption_sizing_template', 'small_caption', 'small_caption_sizing_template'):
         return stack(w, h, 2, frame_piece('ltr'))
@@ -266,10 +246,6 @@ def window_part(name, w, h):
         return stack(w, h, n, glyph('close' if kind == 'small_close' else kind, sets))
     return None
 
-
-# --------------------------------------------------------------------------
-# Theme INI patches
-# --------------------------------------------------------------------------
 
 SYSCOLORS = {
     'Scrollbar': '23 23 23', 'Background': '0 0 0',
@@ -307,7 +283,7 @@ def patch_rc(text):
                 c = map_color(rgb2hex(tuple(int(x) for x in m.groups()[1:])))
                 line = '"%s = %d %d %d\\r\\n"' % ((m.group(1),) + hex2rgb(c))
             if re.match(r'^"(\w*Font) = ', line):
-                line = re.sub(r'= [^,]+, (\d+)(, bold)?', lambda f: '= Segoe UI, 9', line)
+                line = re.sub(r'= [^,]+, (\d+)(, bold)?', '= Segoe UI, 9', line)
         line = line.replace('"DisplayName = Aero\\r\\n"', '"DisplayName = Windows 10 Dark\\r\\n"')
         line = line.replace('"ToolTip = Aero Visual Style\\r\\n"', '"ToolTip = Windows 10 style (dark) for Wine\\r\\n"')
         out.append(line)
@@ -315,9 +291,7 @@ def patch_rc(text):
 
 
 def widen_data_strings(text):
-    """uxtheme reads the name lists and INI text as UTF-16; a standalone wrc
-    compiles plain "..." literals in user-defined resources as 8-bit, so make
-    them explicit wide literals."""
+    """Use wide literals so standalone wrc emits the UTF-16 uxtheme expects."""
     out, in_data = [], False
     for line in text.split('\n'):
         if re.match(r'^\w+ (TEXTFILE|COLORNAMES|SIZENAMES|FILERESNAMES)\b', line):
@@ -330,48 +304,50 @@ def widen_data_strings(text):
     return '\n'.join(out)
 
 
-# --------------------------------------------------------------------------
-# Main
-# --------------------------------------------------------------------------
-
 def main():
-    if os.path.exists(OUT):
-        shutil.rmtree(OUT)
-    os.makedirs(os.path.join(OUT, 'svg'))
-    for f in os.listdir(SRC):
+    if len(sys.argv) != 3:
+        sys.exit('usage: win10theme.py <aero-src-dir> <out-dir>')
+    src, out = sys.argv[1:]
+    if os.path.commonpath([os.path.realpath(src), os.path.realpath(out)]) == os.path.realpath(out):
+        sys.exit('output directory must not contain the source directory')
+    if os.path.exists(out):
+        shutil.rmtree(out)
+    os.makedirs(os.path.join(out, 'svg'))
+    for f in os.listdir(src):
         if f.endswith(('.bmp', '.h')):
-            shutil.copy(os.path.join(SRC, f), OUT)
-    rc = open(os.path.join(SRC, 'aero.rc'), encoding='utf-8').read()
-    open(os.path.join(OUT, 'win10dark.rc'), 'w', encoding='utf-8').write(patch_rc(rc))
+            shutil.copy(os.path.join(src, f), out)
+    rc = open(os.path.join(src, 'aero.rc'), encoding='utf-8').read()
+    open(os.path.join(out, 'win10dark.rc'), 'w', encoding='utf-8').write(patch_rc(rc))
 
     to_render = []
     drawn = 0
-    for f in sorted(os.listdir(SRC)):
+    for f in sorted(os.listdir(src)):
         if not f.endswith('.bmp'):
             continue
-        orig = os.path.join(SRC, f)
+        orig = os.path.join(src, f)
         _, w, h, _ = bmp_info(orig)
         if f.startswith('blue_window_'):
             img = window_part(f, w, abs(h))
             if img is not None:
-                write_bmp(orig, img, os.path.join(OUT, f), flatten=CAP[0])
+                write_bmp(orig, img, os.path.join(out, f), flatten=CAP[0])
                 drawn += 1
                 continue
-        svg = os.path.join(SRC, f[:-4] + '.svg')
+        svg = os.path.join(src, f[:-4] + '.svg')
         text = open(svg, encoding='utf-8').read()
-        dst = os.path.join(OUT, 'svg', f[:-4] + '.svg')
+        dst = os.path.join(out, 'svg', f[:-4] + '.svg')
         open(dst, 'w', encoding='utf-8').write(recolor_svg(text, 'glyph' in f or 'arrow' in f))
         to_render.append(dst)
 
-    # one Inkscape process renders everything (much faster than one per file)
+    # Limit argv length while sharing Inkscape startup across multiple images.
     for i in range(0, len(to_render), 120):
         subprocess.run(['inkscape', '--export-type=png', '--export-overwrite'] + to_render[i:i + 120],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for svg in to_render:
         name = os.path.basename(svg)[:-4]
-        write_bmp(os.path.join(SRC, name + '.bmp'), Image.open(svg[:-4] + '.png'),
-                  os.path.join(OUT, name + '.bmp'))
+        write_bmp(os.path.join(src, name + '.bmp'), Image.open(svg[:-4] + '.png'),
+                  os.path.join(out, name + '.bmp'))
     print('drawn %d window parts, recolored %d control bitmaps' % (drawn, len(to_render)))
 
 
-main()
+if __name__ == '__main__':
+    main()

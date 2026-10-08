@@ -1,1 +1,7 @@
-int __stdcall DllMain(void *h, unsigned long r, void *p) { return 1; }
+int __stdcall DllMain(void *instance, unsigned long reason, void *reserved)
+{
+    (void)instance;
+    (void)reason;
+    (void)reserved;
+    return 1;
+}

@@ -1,7 +1,7 @@
 {
-  description = "Paint.NET on Linux via the official Paint.NET-on-Wine build";
+  description = "Paint.NET on Linux with Wine";
 
-  # Pinned separately from your system nixpkgs: Paint.NET needs Wine >= 11.15.
+  # Older system nixpkgs may not have the Wine version Paint.NET needs.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs =
@@ -19,8 +19,6 @@
         default = paintdotnet;
       };
 
-      # Builds against your nixpkgs instead (needs wineWow64Packages.unstableFull >= 11.15 there, and
-      # allowUnfree for "paintdotnet").
       overlays.default = final: _prev: {
         paintdotnet = final.callPackage ./package.nix { };
       };

@@ -1,12 +1,4 @@
 #!@bash@
-# paintdotnet -- run Paint.NET-on-Wine (packaged by paint.nix)
-#
-# Environment:
-#   PAINTDOTNET_HOME      data dir (default: $XDG_DATA_HOME/paint.nix)
-#   PAINTDOTNET_PREFIX    Wine prefix (default: $PAINTDOTNET_HOME/prefix)
-#   PAINTDOTNET_THEME     "win10dark" (default) or "none" to keep Wine's stock theme
-#   PAINTDOTNET_DRAGFIX   "1" (default) or "0" to disable the palette drag fix
-#   WINE_DRAGFIX_LOG      file to log palette drags to (debugging)
 set -euo pipefail
 
 WINE_BIN=@wine@/bin
@@ -22,17 +14,16 @@ APP_DIR="$DATA_DIR/app"
 THEME="${PAINTDOTNET_THEME:-win10dark}"
 export WINEPREFIX="${PAINTDOTNET_PREFIX:-$DATA_DIR/prefix}"
 export WINEDEBUG="${WINEDEBUG:--all}"
-export PATH="$WINE_BIN:$PATH"
+export PATH="$WINE_BIN:@runtimePath@:$PATH"
 
-log() { echo "paintdotnet: $*" >&2; }
+log() { printf 'paintdotnet: %s\n' "$*" >&2; }
 
-# Paint.NET runs in portable mode and writes its settings (PaintDotNet.AppSettings.json)
-# and AppCache/ next to the exe, so it needs a writable app dir: symlinks into the store,
-# with the exe itself copied so .NET resolves the app base to this dir. Files Paint.NET
-# creates are real files and survive version updates.
+# Copy the exe so .NET uses this writable directory for portable-mode settings.
 sync_app() {
     mkdir -p "$APP_DIR"
-    [ "$(cat "$APP_DIR/.store-path" 2>/dev/null || true)" = "$APP_STORE" ] && return
+    if [ "$(cat "$APP_DIR/.store-path" 2>/dev/null || true)" = "$APP_STORE" ]; then
+        return
+    fi
     log "linking Paint.NET $VERSION into $APP_DIR"
     find "$APP_DIR" -type l -delete
     rm -f "$APP_DIR/paintdotnet.exe"
@@ -44,30 +35,27 @@ sync_app() {
 
 reg() { wine reg add "$@" /f >/dev/null; }
 
-# One-time (and on package change) prefix setup, mirroring upstream install.sh plus extras.
 setup_prefix() {
     local sys="$WINEPREFIX/drive_c/windows" dll pair
 
     log "setting up Wine prefix at $WINEPREFIX"
     mkdir -p "$(dirname "$WINEPREFIX")"
-    # mshtml off so prefix creation doesn't ask for Wine Gecko; mscoree must stay
-    # enabled, Wine's loader needs it for .NET (including self-contained) apps.
+    # Suppress Gecko installation, but leave mscoree enabled for the .NET loader.
     WINEDLLOVERRIDES="mshtml=" wine wineboot --init
     wineserver -w
 
-    # Paint.NET requires Windows 10 21H2+; win11 reports build 22000
+    # win11 reports build 22000, above Paint.NET's Windows 10 21H2 minimum.
     wine winecfg -v win11
-    # ClearType UI text
     reg 'HKCU\Control Panel\Desktop' /v FontSmoothingType /t REG_DWORD /d 2
 
-    # DXVK: without it Paint.NET crashes at startup (null ID3D11Device5)
+    # Wine's builtin D3D11 leaves Paint.NET with a null ID3D11Device5 at startup.
     for dll in d3d8 d3d9 d3d10core d3d11 dxgi; do
         install -m644 "$DXVK/x64/$dll.dll" "$sys/system32/$dll.dll"
         install -m644 "$DXVK/x32/$dll.dll" "$sys/syswow64/$dll.dll"
         reg 'HKCU\Software\Wine\DllOverrides' /v "$dll" /d native
     done
 
-    # Selawik stands in for Segoe UI; fall back to Tahoma/DejaVu for missing glyphs
+    # Substitute Selawik for Segoe UI and register fallback fonts for missing glyphs.
     install -m644 "$FONTS_DIR"/*.ttf "$sys/Fonts/"
     for pair in "Selawik (TrueType)=selawk.ttf" "Selawik Bold (TrueType)=selawkb.ttf" \
                 "Selawik Light (TrueType)=selawkl.ttf" "Selawik Semibold (TrueType)=selawksb.ttf" \
@@ -80,7 +68,6 @@ setup_prefix() {
     reg 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink' /v Selawik /t REG_MULTI_SZ \
         /d 'tahoma.ttf,Tahoma\0DejaVuSans.ttf,DejaVu Sans\0NotoColorEmoji.ttf,Noto Color Emoji'
 
-    # Windows 10 style (dark) visual style, applied like winecfg does
     if [ "$THEME" = win10dark ]; then
         mkdir -p "$sys/resources/themes/win10dark"
         install -m644 "$THEME_DIR/win10dark.msstyles" "$sys/resources/themes/win10dark/win10dark.msstyles"
@@ -89,19 +76,31 @@ setup_prefix() {
     wineserver -w
 }
 
+# Take locks in app-then-prefix order; close them before launching the app.
+mkdir -p "$DATA_DIR" "$WINEPREFIX"
+exec {app_lock}>"$DATA_DIR/.app.lock"
+flock "$app_lock"
+exec {prefix_lock}>"$WINEPREFIX/.paint.nix.lock"
+flock "$prefix_lock"
+
 sync_app
 
-setup_id="1 $DXVK $THEME_DIR $FONTS_DIR $THEME"
+setup_id="1 $WINE_BIN $DXVK $THEME_DIR $FONTS_DIR $THEME"
 marker="$WINEPREFIX/.paint.nix-setup"
 if [ "$(cat "$marker" 2>/dev/null || true)" != "$setup_id" ]; then
     setup_prefix
     echo "$setup_id" > "$marker"
 fi
+exec {prefix_lock}>&-
+exec {app_lock}>&-
 
-# file arguments -> Windows paths
 args=()
 for arg in "$@"; do
-    if [ -e "$arg" ]; then args+=("$(wine winepath -w "$arg" 2>/dev/null)"); else args+=("$arg"); fi
+    if [ -e "$arg" ]; then
+        args+=("$(wine winepath -w "$arg" 2>/dev/null)")
+    else
+        args+=("$arg")
+    fi
 done
 
 export WINEDLLOVERRIDES="mshtml=;d3dcompiler_47=n${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"

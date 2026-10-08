@@ -1,4 +1,5 @@
 #define LANG_NEUTRAL 0x00
 #define LANG_ENGLISH 0x09
+
 #define SUBLANG_NEUTRAL 0x00
 #define SUBLANG_DEFAULT 0x01

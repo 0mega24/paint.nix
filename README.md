@@ -1,151 +1,144 @@
 # paint.nix
 
-[Paint.NET](https://www.getpaint.net/) on NixOS, using the official, experimental
-[Paint.NET-on-Wine](https://github.com/paintdotnet/Paint.NET-on-Wine) build, with fixes that make it
-pleasant on a Linux desktop:
+Run [Paint.NET](https://www.getpaint.net/) on x86_64 NixOS using the experimental
+[Paint.NET-on-Wine](https://github.com/paintdotnet/Paint.NET-on-Wine) release.
+The package includes Wine, DXVK, a dark Windows 10-style theme, Selawik fonts,
+and a desktop entry. A small Wine shim fixes floating palette dragging under
+GNOME/XWayland.
 
-- **Wine 11.18 (WoW64) + DXVK 3.1.1** from a pinned nixos-unstable. Paint.NET needs Wine ≥ 11.15
-  and DXVK, or it crashes at startup.
-- **Floating palettes can be dragged** (Tools, Colors, Layers, History). Without the fix, they stay
-  locked to their canvas corners under GNOME/XWayland. See [How the drag fix works](#how-the-drag-fix-works).
-- **Windows 10 style (dark) window frames and controls** instead of Wine's stock theme, plus Microsoft's
-  open-source Selawik font standing in for Segoe UI.
-- A desktop entry and icons, so it shows up in rofi, fuzzel, GNOME, KDE and so on.
+The pinned packages currently use Wine 11.18 and DXVK 3.1.1. Paint.NET requires
+Wine 11.15 or newer and working Vulkan drivers.
 
-## Usage
+## Install on NixOS
+
+Add the input to your existing flake:
 
 ```nix
-# flake.nix
-{
-  inputs.paint-nix.url = "github:0mega24/paint.nix";
-
-  outputs = { nixpkgs, paint-nix, ... }: {
-    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
-      modules = [
-        paint-nix.nixosModules.default
-        { programs.paintdotnet.enable = true; }
-      ];
-    };
-  };
-}
+inputs.paint-nix.url = "github:0mega24/paint.nix";
 ```
 
-The NixOS module installs the package, links its desktop entry and icons, and enables
-`hardware.graphics` (DXVK needs Vulkan drivers).
+Include `paint-nix` in your `outputs` arguments, then add these entries to your
+NixOS configuration's `modules` list:
 
-You can also install it in other ways:
+```nix
+paint-nix.nixosModules.default
+{ programs.paintdotnet.enable = true; }
+```
 
-- **Home Manager:** import `paint-nix.homeManagerModules.default` and set `programs.paintdotnet.enable = true;`.
-  Vulkan drivers still need `hardware.graphics.enable = true;` in the NixOS config.
-- **Package:** add `paint-nix.packages.x86_64-linux.default` to `environment.systemPackages` or `home.packages`.
-- **Try it:** `nix run github:0mega24/paint.nix`.
-- **Overlay:** `paint-nix.overlays.default` builds against *your* nixpkgs instead. It needs
-  `wineWow64Packages.unstableFull` ≥ 11.15 there, and `allowUnfree` for `paintdotnet`.
+Rebuild NixOS, then run `paintdotnet` or select Paint.NET in your app launcher.
+The module installs the package and its desktop files and enables
+`hardware.graphics` for DXVK. Your machine still needs the appropriate GPU
+configuration.
 
-Paint.NET is freeware, not open source, so the package is marked `unfree`. The flake's own outputs
-allow it for you.
+### Other installation methods
 
-## First launch
+| Method | Configuration |
+|---|---|
+| Home Manager | Add `paint-nix.homeManagerModules.default` to `imports` and set `programs.paintdotnet.enable = true`. Enable Vulkan drivers separately in the NixOS configuration. |
+| Package only | Add `paint-nix.packages.x86_64-linux.default` to `environment.systemPackages` or `home.packages`. |
+| Run without installing | `nix run github:0mega24/paint.nix` |
+| Overlay | Add `paint-nix.overlays.default` to `nixpkgs.overlays` and install `pkgs.paintdotnet`. |
 
-`paintdotnet` (or the "Paint.NET" app entry) sets everything up on first run, and again whenever
-the package changes:
+The module and package outputs use this flake's pinned nixpkgs. The overlay
+uses your nixpkgs, which must provide `wineWow64Packages.unstableFull` at
+version 11.15 or newer. The drag shim also uses private Wine APIs; check their
+compatibility before switching Wine versions. The definitions are in
+[dragfix/wine-dragfix.c](dragfix/wine-dragfix.c); compare them with the matching
+Wine version's `include/ntuser.h`.
 
-| | Default location |
+Paint.NET is freeware and the package is marked unfree. This flake permits
+`paintdotnet` in its own nixpkgs configuration. Overlay users must permit it in
+their configuration, for example:
+
+```nix
+nixpkgs.config.allowUnfreePredicate = pkg:
+  nixpkgs.lib.getName pkg == "paintdotnet";
+```
+
+## Launch and stored data
+
+On first launch, the launcher creates a Wine prefix, sets it to Windows 11,
+and installs DXVK, font substitutions, ClearType settings, and the theme.
+Later launches repeat prefix setup when Wine, DXVK, fonts, or theme settings
+change. Locks serialize setup when more than one launcher starts at once.
+
+With the default environment, files live here:
+
+| Contents | Location |
 |---|---|
 | Wine prefix | `~/.local/share/paint.nix/prefix` |
-| Writable app dir (settings, palette positions) | `~/.local/share/paint.nix/app` |
+| App files, settings, and cache | `~/.local/share/paint.nix/app` |
 
-The prefix is set to Windows 11 with ClearType, DXVK DLLs and overrides, the Selawik fonts and
-substitutes, and the Windows 10 Dark theme.
+Paint.NET runs in portable mode and writes settings beside its executable.
+The launcher copies the executable into the writable app directory and links
+other packaged files from the Nix store. Regular settings files survive app
+updates. Updates currently delete all symlinks in that directory, including
+user-created links.
 
-Paint.NET runs in portable mode and writes its settings next to its exe. The app dir is therefore a
-writable symlink farm into the Nix store, and settings survive updates.
+Open an image from the command line with `paintdotnet /path/to/image.png`.
+Existing file arguments are converted to Windows paths before launching Wine.
 
 ### Environment variables
 
-| Variable | Default | Effect |
+| Variable | Default | Use |
 |---|---|---|
-| `PAINTDOTNET_HOME` | `$XDG_DATA_HOME/paint.nix` | data dir |
-| `PAINTDOTNET_PREFIX` | `$PAINTDOTNET_HOME/prefix` | Wine prefix |
-| `PAINTDOTNET_THEME` | `win10dark` | `none` keeps Wine's stock theme (applies to a new prefix) |
-| `PAINTDOTNET_DRAGFIX` | `1` | `0` disables the palette drag fix |
-| `WINE_DRAGFIX_LOG` | unset | file to log palette drags to |
+| `PAINTDOTNET_HOME` | `${XDG_DATA_HOME:-$HOME/.local/share}/paint.nix` | Change the app's data directory. |
+| `PAINTDOTNET_PREFIX` | `$PAINTDOTNET_HOME/prefix` | Use a different Wine prefix. |
+| `PAINTDOTNET_THEME` | `win10dark` | Set to `none` to skip theme installation in a new prefix. It does not undo an already installed theme. |
+| `PAINTDOTNET_DRAGFIX` | `1` | Set to `0` to disable the palette drag shim. |
+| `WINE_DRAGFIX_LOG` | Unset | Append drag diagnostics to the specified file. |
+| `WINEDEBUG` | `-all` | Override Wine's logging settings. |
+| `DXVK_LOG_LEVEL` | `error` | Override DXVK's logging level. |
 
-## Updating (every 12 weeks)
-
-Paint.NET-on-Wine builds **expire 12 weeks after their build date**. The current one,
-`5.200.9775.2252`, expires on 2026-12-29. To bump it:
-
-```sh
-scripts/update.sh   # needs curl, jq, nix
-```
-
-## How the drag fix works
-
-`wine-dragfix.so` is an `LD_PRELOAD` shim loaded only into Paint.NET's Wine process.
-
-**The problem.** When you drag a window by a Wine-drawn title bar, winex11 hands the move to the
-window manager with `_NET_WM_MOVERESIZE`. It then polls `XQueryPointer` until the button is released.
-Under XWayland the compositor owns the pointer during that drag, so XWayland reports the button as
-already up and the pointer as frozen. winex11 ends the "move" before the window has moved, and
-Paint.NET never gets `WM_MOVING`. Its snap manager, which works out positions from the cursor,
-then puts the palette back in its corner.
-
-**What the shim does** while a window-manager-driven move is in progress (no pointer grabs, no
-synthetic X events):
-
-- reports the button as still held, so winex11's move loop stays alive;
-- reads where the compositor has moved the window, and works out the real pointer delta from it,
-  ignoring positions the app snapped the window back to;
-- feeds Wine matching absolute mouse-move input, so `GetCursorPos` follows the drag;
-- sends `WM_MOVING`, as Windows' move loop would;
-- ends the drag when XWayland gets the pointer back (`EnterNotify`, `ButtonRelease` or `MotionNotify`),
-  with a 30 s timeout as a safety net.
-
-Earlier attempts and why they failed:
-
-| Attempt | Result |
-|---|---|
-| Hide `_NET_WM_MOVERESIZE` so Wine runs its own move loop | stuttery drags, lost button releases, and a leftover X pointer grab that blocked clicks in other apps |
-| Wine's Wayland driver | Paint.NET is disconnected by the compositor (`wl_surface already has a buffer committed`) |
-| Wine virtual desktop | one big window, palettes hidden behind it |
-
-## The theme
-
-Wine only loads XP-format (`PACKTHEM_VERSION` 3) `.msstyles` files, so Windows 10's own theme can't
-be used. `theme/win10dark.msstyles` is Wine's LGPL aero theme restyled by `theme/win10theme.py`:
-
-- window frames and caption buttons are redrawn flat;
-- all controls are recolored to Windows 10 dark with square corners;
-- system colors are set to Windows 10 dark, and fonts to Segoe UI.
-
-`theme/apply-theme.exe` applies it the way winecfg does. To rebuild the theme (needs Python with
-Pillow, Inkscape, Wine's `wrc`, and mingw-w64), download Wine's theme source and run the generator:
+For example, record palette drag diagnostics with:
 
 ```sh
-mkdir aero-src
-curl -L "https://gitlab.winehq.org/wine/wine/-/archive/wine-11.19/wine-wine-11.19.tar.gz?path=dlls/aero.msstyles" \
-  | tar -xz --strip-components=3 -C aero-src
-python3 theme/win10theme.py aero-src out
-theme/build.sh out/win10dark.rc theme/win10dark.msstyles
+WINE_DRAGFIX_LOG="$HOME/paintdotnet-drag.log" paintdotnet
 ```
 
-## Known issues
+## Updates
 
-These come from Paint.NET-on-Wine upstream:
+Paint.NET-on-Wine builds expire 12 weeks after their build date. The packaged
+release, `5.200.9775.2252`, expires on 2026-12-29.
 
-- Rendering is slower than on Windows.
-- Some GIF, palette PNG and CMYK JPEG files won't open.
-- Saving PNGs can fail.
-- Printing and scanning don't work.
-- The Tools window can start out double width (Wine metrics).
+From this repository, run:
 
-Report Paint.NET problems [upstream](https://github.com/paintdotnet/Paint.NET-on-Wine/issues).
+```sh
+scripts/update.sh
+nix build .#default
+```
 
-## Licenses
+The update script needs `curl`, `jq`, and Nix. It fetches the latest release,
+prefetches its archive, and changes the version and Paint.NET source hash in
+`package.nix`. It does not update `flake.lock` or the expiry date in these docs.
+Check the new release's expiry, update the docs, and test before committing.
+
+## Testing status and limitations
+
+The original setup was tested on Ubuntu 26.04 with GNOME on Wayland, XWayland,
+Intel Meteor Lake graphics, and Wine 11.19. Palette dragging and snapping
+worked there. The Nix package builds, and its NixOS and Home Manager modules
+evaluate successfully.
+
+The latest cleanup has passed isolated launcher and shim tests. It has not
+been tested interactively on a real NixOS host or with the packaged Wine 11.18.
+Interactive testing should cover all four palettes, snapping and release,
+open/save, different DPI scales, and monitors with negative origins.
+
+The existing upstream notes list slower rendering, failures with some GIF,
+palette PNG, and CMYK JPEG files, possible PNG save failures, unavailable
+printing and scanning, and an initially oversized Tools palette. Check
+[upstream issues](https://github.com/paintdotnet/Paint.NET-on-Wine/issues) when
+investigating application problems.
+
+## Development and licenses
+
+Build with `nix build .#default` and format Nix sources with `nix fmt`.
+The theme sources are under [theme/](theme/). Rebuilding them requires Python
+with Pillow, Inkscape, Wine's resource compiler, and mingw-w64.
 
 | Component | License |
 |---|---|
-| Paint.NET | freeware (see its `License.txt`) |
-| Theme (derived from Wine's aero theme) | LGPL-2.1-or-later |
+| Paint.NET | Freeware; see the packaged `License.txt`. |
+| Theme derived from Wine's aero theme | LGPL-2.1-or-later |
 | Selawik | OFL-1.1 |

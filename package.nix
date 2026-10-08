@@ -8,9 +8,12 @@
   makeDesktopItem,
   copyDesktopItems,
   libx11,
+  coreutils,
+  findutils,
+  util-linux,
   wineWow64Packages,
   dxvk,
-  # Paint.NET-on-Wine needs Wine >= 11.15 (WoW64 build: no 32-bit host libraries needed).
+  # Avoid the older pkgs.wine that callPackage would inject for a "wine" argument.
   winePackage ? wineWow64Packages.unstableFull,
 }:
 
@@ -20,19 +23,17 @@ assert lib.assertMsg (lib.versionAtLeast winePackage.version "11.15")
 let
   version = "5.200.9775.2252";
 
-  # Builds expire 12 weeks after their build date (this one: 2026-12-29); run scripts/update.sh.
+  # This release expires on 2026-12-29. Update with scripts/update.sh.
   src = fetchurl {
     url = "https://github.com/paintdotnet/Paint.NET-on-Wine/releases/download/v${version}/paint.net.${version}.portable.x64.wine.EXPERIMENTAL.zip";
     hash = "sha256-Cs4FtDlxOfUCCZq0KeMCk478Ier320XQeLfiBOU3LG8="; # paintdotnet
   };
 
-  # Microsoft's open (OFL) Segoe UI-metric-compatible font, substituted for Segoe UI in the prefix.
   selawik = fetchurl {
     url = "https://github.com/microsoft/Selawik/releases/download/1.01/Selawik_Release.zip";
     hash = "sha256-P2LFHgXjtaHmJBz5KjcfC+LqEYOqh7MHGLvUCDKo1CM=";
   };
 
-  # LD_PRELOAD shim that lets Paint.NET's floating palettes be dragged under GNOME/XWayland.
   dragfix = stdenv.mkDerivation {
     pname = "wine-dragfix";
     version = "1";
@@ -40,7 +41,7 @@ let
     buildInputs = [ libx11 ];
     buildPhase = ''
       runHook preBuild
-      $CC -shared -fPIC -O2 -Wall -o wine-dragfix.so wine-dragfix.c -ldl -lpthread
+      $CC -shared -fPIC -O2 -Wall -Wextra -o wine-dragfix.so wine-dragfix.c -ldl
       runHook postBuild
     '';
     installPhase = ''
@@ -70,7 +71,7 @@ stdenvNoCC.mkDerivation {
 
   dontConfigure = true;
   dontBuild = true;
-  # Windows binaries: nothing to strip or patch
+  # The app contains Windows PE binaries, not ELF binaries.
   dontStrip = true;
   dontPatchELF = true;
 
@@ -81,14 +82,13 @@ stdenvNoCC.mkDerivation {
     mkdir -p $share $out/bin $out/lib
 
     cp -r app $share/app
-    rm -f $share/app/*.sh # upstream install/launch scripts; the launcher replaces them
+    rm -f $share/app/*.sh
 
     install -Dm644 -t $share/fonts fonts/*.ttf
     install -Dm644 ${./theme/win10dark.msstyles} $share/theme/win10dark.msstyles
     install -Dm644 ${./theme/apply-theme.exe} $share/theme/apply-theme.exe
     install -Dm755 ${dragfix}/lib/wine-dragfix.so $out/lib/wine-dragfix.so
 
-    # icons from the app's .ico (one PNG per frame size)
     magick app/paintdotnet.ico icon-%d.png
     for f in icon-*.png; do
       size=$(magick identify -format '%w' "$f")
@@ -98,6 +98,13 @@ stdenvNoCC.mkDerivation {
     substitute ${./launcher.sh} $out/bin/paintdotnet \
       --subst-var-by bash ${stdenv.shell} \
       --subst-var-by wine ${winePackage} \
+      --subst-var-by runtimePath ${
+        lib.makeBinPath [
+          coreutils
+          findutils
+          util-linux
+        ]
+      } \
       --subst-var-by dxvk ${dxvk.bin} \
       --subst-var-by app $share/app \
       --subst-var-by theme $share/theme \
@@ -143,9 +150,9 @@ stdenvNoCC.mkDerivation {
   };
 
   meta = {
-    description = "Paint.NET image editor for Linux via the official Paint.NET-on-Wine build";
+    description = "Paint.NET image editor running under Wine";
     homepage = "https://github.com/paintdotnet/Paint.NET-on-Wine";
-    license = lib.licenses.unfree; # Paint.NET is freeware; see app/License.txt
+    license = lib.licenses.unfree;
     sourceProvenance = [ lib.sourceTypes.binaryNativeCode ];
     platforms = [ "x86_64-linux" ];
     mainProgram = "paintdotnet";
