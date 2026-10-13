@@ -8,6 +8,7 @@ APP_STORE=@app@
 THEME_DIR=@theme@
 FONTS_DIR=@fonts@
 DRAGFIX=@dragfix@
+WICFIX=@wicfix@
 VERSION=@version@
 
 DATA_DIR="${PAINTDOTNET_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/paint.nix}"
@@ -70,6 +71,10 @@ setup_prefix() {
         reg 'HKCU\Software\Wine\DllOverrides' /v "$dll" /d native
     done
 
+    # Patched windowscodecs that lets PNG saves skip metadata Wine cannot write.
+    install -m644 "$WICFIX" "$sys/system32/windowscodecs.dll"
+    reg 'HKCU\Software\Wine\DllOverrides' /v windowscodecs /d native,builtin
+
     # Substitute Selawik for Segoe UI and register fallback fonts for missing glyphs.
     install -m644 "$FONTS_DIR"/*.ttf "$sys/Fonts/"
     for pair in "Selawik (TrueType)=selawk.ttf" "Selawik Bold (TrueType)=selawkb.ttf" \
@@ -100,7 +105,7 @@ flock "$prefix_lock"
 
 sync_app
 
-setup_id="1 $WINE_BIN $DXVK $THEME_DIR $FONTS_DIR $THEME"
+setup_id="1 $WINE_BIN $DXVK $WICFIX $THEME_DIR $FONTS_DIR $THEME"
 marker="$WINEPREFIX/.paint.nix-setup"
 if [ "$(cat "$marker" 2>/dev/null || true)" != "$setup_id" ]; then
     setup_prefix

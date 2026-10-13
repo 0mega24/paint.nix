@@ -1,0 +1,16 @@
+--- a/dlls/windowscodecs/encoder.c
++++ b/dlls/windowscodecs/encoder.c
+@@ -718,9 +718,11 @@
+ 
+ static HRESULT WINAPI CommonEncoderFrame_Block_AddWriter(IWICMetadataBlockWriter *iface, IWICMetadataWriter *metadata_writer)
+ {
+-    FIXME("iface %p, metadata_writer %p.\n", iface, metadata_writer);
++    /* paint.nix: drop the block instead of failing the encode. */
++    FIXME("iface %p, metadata_writer %p, ignoring.\n", iface, metadata_writer);
+ 
+-    return E_NOTIMPL;
++    if (!metadata_writer) return E_INVALIDARG;
++    return S_OK;
+ }
+ 
+ static HRESULT WINAPI CommonEncoderFrame_Block_SetWriterByIndex(IWICMetadataBlockWriter *iface, UINT index,

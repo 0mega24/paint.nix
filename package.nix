@@ -53,6 +53,36 @@ let
       runHook postInstall
     '';
   };
+
+  # Wine stubs two WIC methods Paint.NET needs: IWICMetadataBlockWriter::AddWriter
+  # (PNG saves fail when adding EXIF metadata) and IWICPixelFormatInfo::GetColorContext
+  # (GIFs, palette PNGs and the save preview fail to load). Rebuild only
+  # windowscodecs.dll with both patched, and clear its builtin signature so the
+  # prefix can load it as native.
+  wicfix = winePackage.overrideAttrs (old: {
+    pname = "wine-wicfix";
+    patches = (old.patches or [ ]) ++ [
+      ./wicfix/addwriter.patch
+      ./wicfix/colorcontext.patch
+    ];
+    outputs = [ "out" ];
+    buildPhase = ''
+      runHook preBuild
+      make -j$NIX_BUILD_CORES dlls/windowscodecs/x86_64-windows/windowscodecs.dll
+      runHook postBuild
+    '';
+    installPhase = ''
+      dll=dlls/windowscodecs/x86_64-windows/windowscodecs.dll
+      x86_64-w64-mingw32-strip $dll
+      grep -q 'Wine builtin DLL' $dll
+      sed -i 's/Wine builtin DLL/\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00/' $dll
+      install -Dm644 $dll $out/lib/windowscodecs.dll
+    '';
+    postInstall = "";
+    separateDebugInfo = false;
+    doCheck = false;
+    dontFixup = true;
+  });
 in
 stdenvNoCC.mkDerivation {
   pname = "paintdotnet";
@@ -91,6 +121,7 @@ stdenvNoCC.mkDerivation {
     install -Dm644 ${./theme/win10dark.msstyles} $share/theme/win10dark.msstyles
     install -Dm644 ${./theme/apply-theme.exe} $share/theme/apply-theme.exe
     install -Dm755 ${dragfix}/lib/wine-dragfix.so $out/lib/wine-dragfix.so
+    install -Dm644 ${wicfix}/lib/windowscodecs.dll $out/lib/windowscodecs.dll
 
     magick app/paintdotnet.ico icon-%d.png
     for f in icon-*.png; do
@@ -114,6 +145,7 @@ stdenvNoCC.mkDerivation {
       --subst-var-by theme $share/theme \
       --subst-var-by fonts $share/fonts \
       --subst-var-by dragfix $out/lib/wine-dragfix.so \
+      --subst-var-by wicfix $out/lib/windowscodecs.dll \
       --subst-var-by version ${version}
     chmod +x $out/bin/paintdotnet
 
@@ -150,7 +182,7 @@ stdenvNoCC.mkDerivation {
   ];
 
   passthru = {
-    inherit winePackage dragfix;
+    inherit winePackage dragfix wicfix;
   };
 
   meta = {

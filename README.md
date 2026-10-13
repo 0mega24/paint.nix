@@ -5,7 +5,8 @@ experimental
 [Paint.NET-on-Wine](https://github.com/paintdotnet/Paint.NET-on-Wine) release.
 The package includes Wine, DXVK, a dark Windows 10-style theme, Selawik fonts,
 and a desktop entry. A small Wine shim fixes floating palette dragging under
-GNOME/XWayland.
+GNOME/XWayland, and a patched `windowscodecs.dll` fixes PNG saving and opening
+GIF and palette PNG files.
 
 The pinned packages currently use Wine 11.18 and DXVK 3.1.1. Paint.NET requires
 Wine 11.15 or newer and working Vulkan drivers.
@@ -78,6 +79,15 @@ compatibility before switching Wine versions. The definitions are in
 [dragfix/wine-dragfix.c](dragfix/wine-dragfix.c); compare them with the matching
 Wine version's `include/ntuser.h`.
 
+The package also rebuilds `windowscodecs.dll` from the selected Wine source with
+two patches in [wicfix/](wicfix/). The launcher installs it in the prefix as a
+native override.
+
+| Patch | Wine stub | Effect in Paint.NET |
+|---|---|---|
+| [addwriter.patch](wicfix/addwriter.patch) | `IWICMetadataBlockWriter::AddWriter` | PNG saves no longer fail ([#14](https://github.com/paintdotnet/Paint.NET-on-Wine/issues/14)). PNG files save without EXIF metadata. |
+| [colorcontext.patch](wicfix/colorcontext.patch) | `IWICPixelFormatInfo::GetColorContext` | GIFs, palette PNGs, and the save dialog preview load as sRGB ([#18](https://github.com/paintdotnet/Paint.NET-on-Wine/issues/18)). CMYK JPEGs still fail. |
+
 Paint.NET is freeware and the package is marked unfree. This flake permits
 `paintdotnet` in its own nixpkgs configuration. Overlay users must permit it in
 their configuration, for example:
@@ -90,9 +100,10 @@ nixpkgs.config.allowUnfreePredicate = pkg:
 ## Launch and stored data
 
 On first launch, the launcher creates a Wine prefix, sets it to Windows 11,
-and installs DXVK, font substitutions, ClearType settings, and the theme.
-Later launches repeat prefix setup when Wine, DXVK, fonts, or theme settings
-change. Locks serialize setup when more than one launcher starts at once.
+and installs DXVK, the patched `windowscodecs.dll`, font substitutions,
+ClearType settings, and the theme. Later launches repeat prefix setup when
+Wine, DXVK, the patched DLL, fonts, or theme settings change. Locks serialize
+setup when more than one launcher starts at once.
 
 With the default environment, files live here:
 
@@ -159,8 +170,8 @@ Interactive testing should cover all four palettes, snapping and release,
 open/save, different DPI scales, and monitors with negative origins.
 
 The existing upstream notes list slower rendering, failures with some GIF,
-palette PNG, and CMYK JPEG files, possible PNG save failures, unavailable
-printing and scanning, and an initially oversized Tools palette. Check
+palette PNG, and CMYK JPEG files, PNG save failures, unavailable printing and
+scanning, and an initially oversized Tools palette. Check
 [upstream issues](https://github.com/paintdotnet/Paint.NET-on-Wine/issues) when
 investigating application problems.
 

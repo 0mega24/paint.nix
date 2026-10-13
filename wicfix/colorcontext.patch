@@ -1,0 +1,40 @@
+--- a/dlls/windowscodecs/info.c
++++ b/dlls/windowscodecs/info.c
+@@ -1334,8 +1334,35 @@
+ static HRESULT WINAPI PixelFormatInfo_GetColorContext(IWICPixelFormatInfo2 *iface,
+     IWICColorContext **ppIColorContext)
+ {
+-    FIXME("(%p,%p): stub\n", iface, ppIColorContext);
+-    return E_NOTIMPL;
++    PixelFormatInfo *This = impl_from_IWICPixelFormatInfo2(iface);
++    const GUID *format = &This->base.clsid;
++    IWICColorContext *context;
++    HRESULT hr;
++
++    /* paint.nix: report sRGB for everything except CMYK, which has no profile here. */
++    FIXME("(%p,%p): returning sRGB\n", iface, ppIColorContext);
++
++    if (!ppIColorContext) return E_INVALIDARG;
++    *ppIColorContext = NULL;
++
++    if (IsEqualGUID(format, &GUID_WICPixelFormat32bppCMYK) ||
++        IsEqualGUID(format, &GUID_WICPixelFormat40bppCMYKAlpha) ||
++        IsEqualGUID(format, &GUID_WICPixelFormat64bppCMYK) ||
++        IsEqualGUID(format, &GUID_WICPixelFormat80bppCMYKAlpha))
++        return E_NOTIMPL;
++
++    hr = ColorContext_Create(&context);
++    if (FAILED(hr)) return hr;
++
++    hr = IWICColorContext_InitializeFromExifColorSpace(context, 1);
++    if (FAILED(hr))
++    {
++        IWICColorContext_Release(context);
++        return hr;
++    }
++
++    *ppIColorContext = context;
++    return S_OK;
+ }
+ 
+ static HRESULT WINAPI PixelFormatInfo_GetBitsPerPixel(IWICPixelFormatInfo2 *iface,
